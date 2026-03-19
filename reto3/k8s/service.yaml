@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ordersystem-api-svc
+  namespace: ordersystem
+spec:
+  selector:
+    app: ordersystem-api
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30080
+  type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notifications-api-svc
+  namespace: ordersystem
+spec:
+  selector:
+    app: notifications-api
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP

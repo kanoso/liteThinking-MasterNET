@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "Nuevo perfil",
+    "Projects": [
+      {
+        "Path": "src\\OrderSystem.Api\\OrderSystem.Api.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "src\\OrderSystem.Notifications\\OrderSystem.Notifications.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]

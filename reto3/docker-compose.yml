@@ -1,0 +1,23 @@
+services:
+  ordersystem-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ordersystem-api:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - NotificationsUrl=http://notifications-api:8080
+    depends_on:
+      - notifications-api
+
+  notifications-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.notifications
+    image: notifications-api:latest
+    ports:
+      - "8081:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development

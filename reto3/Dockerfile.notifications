@@ -1,0 +1,18 @@
+# Etapa 1: build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+COPY ["src/OrderSystem.Notifications/OrderSystem.Notifications.csproj", "src/OrderSystem.Notifications/"]
+RUN dotnet restore "src/OrderSystem.Notifications/OrderSystem.Notifications.csproj"
+
+COPY . .
+WORKDIR "/src/src/OrderSystem.Notifications"
+RUN dotnet publish "OrderSystem.Notifications.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+# Etapa 2: runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+WORKDIR /app
+EXPOSE 8080
+ENV ASPNETCORE_URLS=http://+:8080
+COPY --from=build /app/publish .
+ENTRYPOINT ["dotnet", "OrderSystem.Notifications.dll"]
