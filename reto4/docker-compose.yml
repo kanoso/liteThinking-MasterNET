@@ -1,0 +1,52 @@
+services:
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orders-api:
+    build:
+      context: .
+      dockerfile: src/Orders.Api/Dockerfile
+    container_name: orders-api
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - RabbitMQ__Host=rabbitmq
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  orders-worker:
+    build:
+      context: .
+      dockerfile: src/Orders.Worker/Dockerfile
+    container_name: orders-worker
+    environment:
+      - RabbitMQ__Host=rabbitmq
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  orders-gateway:
+    build:
+      context: .
+      dockerfile: src/Orders.Gateway/Dockerfile
+    container_name: orders-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ReverseProxy__Clusters__orders-cluster__Destinations__orders-api__Address=http://orders-api:8080
+    depends_on:
+      - orders-api
