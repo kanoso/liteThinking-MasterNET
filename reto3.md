@@ -122,7 +122,7 @@ reto3/
 - [x] Capturar evidencia de recreacion automatica (`kubectl get pods -n ordersystem -w`)
 
 ### 9. Entregables
-- [ ] Repositorio actualizado con todo el codigo
+- [x] Repositorio actualizado con todo el codigo
 - [x] Archivos YAML en carpeta `k8s/`
 - [x] Evidencias de escalado y self-healing (capturas o logs)
 - [x] README con decisiones arquitectonicas y trade-offs

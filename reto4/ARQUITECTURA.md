@@ -1,455 +1,418 @@
-# Reto 4 — Evolución hacia Arquitectura de Microservicios Distribuidos
+# Reto 4 — Evolución hacia Arquitectura Distribuida
 
-> [!NOTE]
-> Este documento describe el estado actual del sistema (Reto 3) y la evolución propuesta hacia
-> una arquitectura distribuida basada en microservicios con API Gateway, comunicación por eventos
-> y procesamiento asíncrono con workers.
+## Índice
+
+1. [Estado actual — Reto 3](#estado-actual--reto-3)
+2. [Problemas identificados en Reto 3](#problemas-identificados-en-reto-3)
+3. [Evolución — Reto 4](#evolución--reto-4)
+4. [Flujo completo de una orden](#flujo-completo-de-una-orden)
+5. [Contratos de eventos](#contratos-de-eventos)
+6. [Estructura de proyectos](#estructura-de-proyectos)
 
 ---
 
-## 1. Estado Actual — Reto 3
+## Estado actual — Reto 3
 
-### Estructura del Proyecto
+El reto 3 introduce un segundo servicio (`OrderSystem.Notifications`) y comunicación HTTP directa entre servicios. Es el primer paso hacia la distribución, pero mantiene acoplamiento temporal fuerte.
 
-El Reto 3 implementa un sistema de órdenes con **dos servicios** desplegados en Kubernetes:
-
-| Servicio | Tecnología | Exposición |
-|---|---|---|
-| `OrderSystem.Api` | ASP.NET Core (.NET 10) | NodePort 30080 |
-| `OrderSystem.Notifications` | ASP.NET Core (.NET 10) | ClusterIP interno |
-
-### Arquitectura Interna del Servicio de Órdenes
-
-El servicio principal sigue una **arquitectura en capas con DDD**:
-
-```
-OrderSystem.Api
-├── Domain          → Entidades, Value Objects, Interfaces de Repositorio
-├── Application     → Use Cases, DTOs
-├── Infrastructure  → InMemoryOrderRepository
-└── Api             → Controllers, Program.cs
-```
-
-### Diagrama de Componentes — Reto 3
+### Arquitectura de servicios
 
 ```mermaid
-graph TB
-    subgraph Cliente["Cliente (Browser / HTTP Client)"]
-        C([":30080 NodePort"])
+flowchart TD
+    Client(["HTTP Client<br/>Postman / Browser"])
+
+    subgraph OrderApi["OrderSystem.Api — :5268"]
+        direction TB
+        Controller["OrdersController<br/>POST /api/orders<br/>POST /api/orders/{id}/items<br/>GET  /api/orders<br/>GET  /health"]
+        UC["Application Layer<br/>CreateOrderUseCase<br/>AddItemToOrderUseCase<br/>GetOrdersUseCase"]
+        Repo["InMemoryOrderRepository<br/>Dictionary&lt;Guid, Order&gt;"]
     end
 
-    subgraph K8S["Kubernetes — Namespace: ordersystem"]
-        subgraph API["OrderSystem.Api — ClusterIP / NodePort"]
-            OC[OrdersController]
-            CU[CreateOrderUseCase]
-            AIU[AddItemToOrderUseCase]
-            GOU[GetOrdersUseCase]
-            REPO[(InMemory<br/>Repository)]
-
-            OC --> CU
-            OC --> AIU
-            OC --> GOU
-            CU --> REPO
-            AIU --> REPO
-            GOU --> REPO
-        end
-
-        subgraph NOTIF["OrderSystem.Notifications — ClusterIP"]
-            NC[NotificationsController<br/>POST /notifications/notify]
-        end
+    subgraph Domain["OrderSystem.Domain"]
+        direction LR
+        OrderEntity["Order<br/>(Aggregate Root)"]
+        ItemEntity["OrderItem<br/>(Entity)"]
+        MoneyVO["Money<br/>(Value Object)"]
     end
 
-    C --> OC
-    OC -- "HTTP POST (sync)<br/>fire-and-forget" --> NC
+    subgraph NotifApi["OrderSystem.Notifications — :55208"]
+        NotifCtrl["NotificationsController<br/>POST /notifications/notify"]
+        Logger["ILogger<br/>LogInformation(...)"]
+    end
+
+    Client -->|"HTTP POST /api/orders"| Controller
+    Controller -->|"ExecuteAsync()"| UC
+    UC --> Repo
+    UC --> Domain
+    Controller -->|"❗ HTTP síncrono<br/>IHttpClientFactory"| NotifCtrl
+    NotifCtrl --> Logger
+
+    classDef blue fill:#0984e3,stroke:#0984e3,color:#fff
+    classDef green fill:#00b894,stroke:#00b894,color:#fff
+    classDef yellow fill:#fdcb6e,stroke:#e17055,color:#2d3436
+    classDef red fill:#d63031,stroke:#d63031,color:#fff
+
+    class Controller,UC,Repo blue
+    class OrderEntity,ItemEntity,MoneyVO green
+    class NotifCtrl,Logger red
+    class Client yellow
 ```
 
-> [!WARNING]
-> **Comunicación síncrona y acoplada.** El `OrdersController` llama directamente al servicio de
-> notificaciones vía `HttpClient`. Si el servicio de notificaciones está caído, el log muestra una
-> advertencia pero la orden igual se crea. Esto es un **acoplamiento temporal** disfrazado de
-> resiliencia — si en algún momento la notificación fuera crítica, se perdería silenciosamente.
-
----
-
-### Flujo de Creación de una Orden — Reto 3
+### Flujo de creación de una orden — Reto 3
 
 ```mermaid
 sequenceDiagram
-    actor Cliente
-    participant CTRL as OrdersController<br/>[Api Layer]
-    participant UC as CreateOrderUseCase<br/>[Application Layer]
-    participant DOM as Order.Create()<br/>[Domain Layer]
-    participant REPO as InMemoryRepository<br/>[Infrastructure Layer]
-    participant HTTP as IHttpClientFactory<br/>[Api Layer]
-    participant NOTIF as NotificationsController<br/>[Notifications.Api]
+    autonumber
+    actor Client as Cliente
+    participant API as OrdersController
+    participant UC  as CreateOrderUseCase
+    participant Repo as InMemoryRepo
+    participant NS  as Notifications :55208
 
-    Cliente->>CTRL: POST /api/orders<br/>{ customerName: "Juan" }
+    Client->>API: POST /api/orders { customerName }
 
-    Note over CTRL: ModelState validation (ASP.NET Core)
-
-    CTRL->>UC: ExecuteAsync(CreateOrderRequest)
-
-    UC->>DOM: Order.Create(customerName)
-    Note over DOM: Valida que customerName no sea vacío<br/>Asigna Id = Guid.NewGuid()<br/>Status = Pending<br/>CreatedAt = UtcNow
-    DOM-->>UC: Order (instancia nueva)
-
-    UC->>REPO: AddAsync(order)
-    Note over REPO: _orders[order.Id] = order<br/>Dictionary[Guid, Order] en memoria
-    REPO-->>UC: Task.CompletedTask
-
-    UC->>UC: MapToResponse(order)
-    Note over UC: Proyecta Order → OrderResponse (DTO)<br/>Items vacíos, Total = 0
-    UC-->>CTRL: OrderResponse { Id, CustomerName,<br/>Status="Pending", Items=[], Total=0 }
-
-    CTRL->>HTTP: CreateClient("notifications")
-    HTTP-->>CTRL: HttpClient<br/>BaseAddress = http://notifications-api-svc
-
-    CTRL->>NOTIF: POST /notifications/notify<br/>{ orderId, customerName }
-
-    alt Notificaciones disponible
-        NOTIF->>NOTIF: LogInformation(orderId, customerName)
-        NOTIF-->>CTRL: 200 OK { message, orderId }
-    else Notificaciones caído o timeout
-        NOTIF-->>CTRL: HttpRequestException / timeout
-        CTRL->>CTRL: LogWarning("No se pudo notificar...")<br/>⚠️ Error silenciado — la orden ya fue guardada
+    rect rgb(30, 100, 200)
+        note over API,Repo: Lógica de negocio correcta
+        API->>UC: ExecuteAsync(request)
+        UC->>Repo: AddAsync(order)
+        Repo-->>UC: order guardada
+        UC-->>API: OrderResponse
     end
 
-    CTRL-->>Cliente: 201 Created<br/>Location: /api/orders/{id}<br/>Body: OrderResponse
-```
+    rect rgb(200, 50, 50)
+        note over API,NS: ❌ Problema — integración en el Controller
+        API->>NS: POST /notifications/notify<br/>{ orderId, customerName }
+        alt Notifications responde OK
+            NS-->>API: 200 OK
+        else Notifications caída / timeout
+            NS--xAPI: HttpRequestException capturada
+            note over API: LogWarning y continúa
+        end
+    end
 
-> [!WARNING]
-> **Punto crítico del flujo:** la orden se persiste en memoria **antes** de llamar a notificaciones.
-> Si el proceso se reinicia después de guardar pero antes de notificar, la orden existe pero
-> la notificación se perdió para siempre. No hay garantía de entrega — ni reintentos ni DLQ.
+    API-->>Client: 201 Created { id, status... }
+    note over Client,NS: El cliente espera TODO el ciclo,<br/>incluyendo la llamada a Notifications
+```
 
 ---
 
-### Infraestructura — Reto 3
+## Problemas identificados en Reto 3
+
+#### ❌ Problema 1 — Responsabilidad mal ubicada
+
+La llamada al servicio de Notifications está en el `OrdersController` (`OrdersController.cs:52-65`). El Controller tiene una sola responsabilidad: traducir HTTP a Use Cases y devolver una respuesta. La integración con otros servicios no le corresponde — eso es trabajo del Use Case o de la capa de Infrastructure.
+
+#### ❌ Problema 2 — Acoplamiento temporal
+
+La comunicación es HTTP síncrona: el cliente queda bloqueado esperando que Notifications responda antes de recibir su `201 Created`. Si Notifications es lento, el cliente espera más. Si Notifications cae, el error hay que capturarlo en el Controller con un `try/catch`. Dos servicios independientes terminan acoplados en tiempo de respuesta.
+
+#### ❌ Problema 3 — Sin punto de entrada único
+
+El cliente necesita conocer el puerto de cada servicio directamente (`Order API: :5268`, `Notifications: :55208`). Si un servicio cambia de puerto, se escala horizontalmente o se mueve a otro host, el cliente se rompe. No hay ninguna capa que abstraiga esa complejidad.
+
+#### ❌ Problema 4 — Configuración faltante
+
+`NotificationsUrl` no está declarada en `appsettings.json`. El `IHttpClientFactory` intenta leer esa key en runtime y falla silenciosamente o lanza una excepción según el contexto.
+
+---
+
+## Evolución — Reto 4
+
+### Arquitectura objetivo
 
 ```mermaid
-graph LR
-    subgraph DockerCompose["docker-compose.yml"]
-        S1[ordersystem-api<br/>puerto 8080]
-        S2[notifications-api<br/>puerto 8081]
-        S1 -- "depends_on" --> S2
+flowchart TD
+    Client(["HTTP Client<br/>Postman / Browser"])
+
+    subgraph GW["OrderSystem.Gateway — :5000"]
+        YARP["YARP Reverse Proxy<br/>/api/orders/**  → :5001<br/>/notifications/** → :5002"]
     end
 
-    subgraph Kubernetes["k8s/"]
-        NS[Namespace: ordersystem]
-        CM[ConfigMap:<br/>ordersystem-config]
-        D1[Deployment:<br/>ordersystem-api<br/>1 replica]
-        D2[Deployment:<br/>notifications-api<br/>1 replica]
-        SVC1[Service: NodePort<br/>:30080 → :8080]
-        SVC2[Service: ClusterIP<br/>:80 → :8080]
-
-        NS --> D1
-        NS --> D2
-        CM --> D1
-        D1 --> SVC1
-        D2 --> SVC2
-        D1 -- "NotificationsUrl=<br/>http://notifications-api-svc" --> SVC2
+    subgraph OrderSvc["Order Service — :5001"]
+        direction TB
+        Ctrl["OrdersController<br/>solo HTTP → UseCase → response"]
+        UseCase["CreateOrderUseCase<br/>guarda orden + publica evento"]
+        InfraRepo["InMemoryOrderRepository"]
     end
+
+    subgraph Messaging["Event Bus — Channel&lt;T&gt;"]
+        direction LR
+        IBus["IEventBus<br/>(abstracción)"]
+        ImplBus["InMemoryEventBus<br/>Channel&lt;object&gt;"]
+        IBus -.->|"implementa"| ImplBus
+    end
+
+    subgraph NotifSvc["Notification Service — :5002"]
+        direction TB
+        Worker["OrderCreatedWorker<br/>BackgroundService<br/>ReadAllAsync(cancellationToken)"]
+        NotifCtrl2["NotificationsController<br/>POST /notifications/notify"]
+        LogSvc["ILogger<br/>LogInformation(...)"]
+        Worker --> LogSvc
+        Worker -->|"opcional"| NotifCtrl2
+    end
+
+    Client -->|"HTTP :5000"| YARP
+    YARP -->|"proxy /api/orders/**"| Ctrl
+    YARP -->|"proxy /notifications/**"| NotifCtrl2
+    Ctrl --> UseCase
+    UseCase --> InfraRepo
+    UseCase -->|"PublishAsync<br/>(OrderCreatedEvent)"| IBus
+    ImplBus -->|"ReadAllAsync<br/>(asíncrono)"| Worker
+
+    classDef purple fill:#6c5ce7,stroke:#6c5ce7,color:#fff
+    classDef blue fill:#0984e3,stroke:#0984e3,color:#fff
+    classDef teal fill:#00cec9,stroke:#00cec9,color:#fff
+    classDef green fill:#00b894,stroke:#00b894,color:#fff
+    classDef yellow fill:#fdcb6e,stroke:#e17055,color:#2d3436
+
+    class YARP purple
+    class Ctrl,UseCase,InfraRepo blue
+    class IBus,ImplBus teal
+    class Worker,NotifCtrl2,LogSvc green
+    class Client yellow
 ```
 
----
+### Componentes — detalle técnico
 
-### Problemas Identificados en Reto 3
-
-> [!CAUTION]
-> Estos son los problemas que motivan la evolución al Reto 4.
-
-| # | Problema | Impacto |
-|---|---|---|
-| 1 | **Comunicación síncrona entre servicios** | Acoplamiento temporal — si Notifications falla, el evento se pierde |
-| 2 | **Storage en memoria** | Sin persistencia — datos se pierden al reiniciar el pod |
-| 3 | **Sin API Gateway** | El cliente accede directamente al servicio — sin enrutamiento, auth centralizada ni rate limiting |
-| 4 | **Sin mensajería / broker** | No hay cola de eventos — no se puede escalar el procesamiento asíncrono |
-| 5 | **Sin workers** | No hay procesamiento en background ni tareas desacopladas |
-| 6 | **Single replica sin estado compartido** | No se puede escalar horizontalmente con InMemoryRepository |
-
----
-
-## 2. Evolución Propuesta — Reto 4
-
-### Objetivo
-
-Transformar el sistema en una **arquitectura distribuida de microservicios** con:
-
-- **API Gateway** como único punto de entrada para los clientes
-- **Comunicación por eventos** entre servicios (desacoplamiento asíncrono)
-- **Message Broker** (RabbitMQ) como bus de eventos
-- **Worker Service** que procesa eventos en background
-- **Persistencia real** (reemplaza InMemoryRepository)
-
----
-
-### Nuevos Componentes
-
-| Componente | Rol | Tecnología |
-|---|---|---|
-| `ApiGateway` | Enruta, autentica y protege | YARP / Nginx |
-| `OrderService` | Dominio de órdenes (evolución del actual) | ASP.NET Core |
-| `NotificationWorker` | Procesa eventos `OrderCreated` | .NET Worker Service |
-| `InventoryService` | Valida stock antes de confirmar orden | ASP.NET Core |
-| `RabbitMQ` | Message broker — bus de eventos | RabbitMQ |
-| `PostgreSQL` | Persistencia de órdenes | PostgreSQL |
-
----
-
-### Diagrama de Arquitectura — Reto 4
+#### 1. API Gateway (YARP)
 
 ```mermaid
-graph TB
-    subgraph Clientes["Clientes externos"]
-        WEB([Web App])
-        MOB([Mobile App])
-        EXT([Terceros / API])
+flowchart LR
+    Client(["Cliente"])
+
+    subgraph GW["API Gateway — YARP"]
+        Router{{"Router<br/>appsettings.json"}}
     end
 
-    subgraph Gateway["API Gateway — puerto 80/443"]
-        GW[YARP / Nginx<br/>Routing + Auth + Rate Limiting]
+    subgraph Backends["Servicios internos"]
+        OS["Order Service<br/>:5001"]
+        NS["Notification Service<br/>:5002"]
     end
 
-    subgraph Servicios["Microservicios — Kubernetes Namespace: ordersystem"]
-        subgraph OrderSvc["Order Service — :8080"]
-            OC[OrdersController]
-            CU[CreateOrderUseCase]
-            PUB[EventPublisher<br/>IMessageBus]
-            DB1[(PostgreSQL<br/>Orders DB)]
+    Client -->|"POST /api/orders"| Router
+    Client -->|"GET /api/orders"| Router
+    Client -->|"POST /notifications/notify"| Router
+    Router -->|"/api/orders/**"| OS
+    Router -->|"/notifications/**"| NS
 
-            OC --> CU
-            CU --> PUB
-            CU --> DB1
-        end
+    classDef purple fill:#6c5ce7,stroke:#6c5ce7,color:#fff
+    classDef blue fill:#0984e3,stroke:#0984e3,color:#fff
+    classDef yellow fill:#fdcb6e,stroke:#e17055,color:#2d3436
 
-        subgraph InvSvc["Inventory Service — :8082"]
-            IC[InventoryController]
-            INVDB[(PostgreSQL<br/>Inventory DB)]
-            IC --> INVDB
-        end
+    class Router purple
+    class OS,NS blue
+    class Client yellow
+```
 
-        subgraph NotifWorker["Notification Worker — background"]
-            W[WorkerService<br/>IHostedService]
-            NS[NotificationSender<br/>Email / SMS / Push]
-            W --> NS
-        end
+#### 2. Event Bus — flujo de publicación y consumo
+
+```mermaid
+flowchart LR
+    subgraph Producer["Productor"]
+        UC2["CreateOrderUseCase"]
     end
 
-    subgraph Broker["Message Broker"]
-        RMQ[RabbitMQ<br/>Exchanges + Queues]
+    subgraph Bus["Event Bus — Channel&lt;T&gt;"]
+        Writer["ChannelWriter<br/>TryWrite(@event)"]
+        Buffer[["buffer unbounded"]]
+        Reader["ChannelReader<br/>ReadAllAsync(ct)"]
+        Writer --> Buffer --> Reader
     end
 
-    WEB --> GW
-    MOB --> GW
-    EXT --> GW
+    subgraph Consumer["Consumidor"]
+        W["OrderCreatedWorker<br/>BackgroundService"]
+    end
 
-    GW -- "/orders/*" --> OC
-    GW -- "/inventory/*" --> IC
+    UC2 -->|"PublishAsync<br/>(OrderCreatedEvent)"| Writer
+    Reader -->|"IAsyncEnumerable&lt;object&gt;"| W
 
-    OC -- "HTTP sync<br/>validar stock" --> IC
+    classDef blue fill:#0984e3,stroke:#0984e3,color:#fff
+    classDef teal fill:#00cec9,stroke:#00cec9,color:#fff
+    classDef green fill:#00b894,stroke:#00b894,color:#fff
 
-    PUB -- "Publish: OrderCreated" --> RMQ
-    RMQ -- "Subscribe: order.created" --> W
+    class UC2 blue
+    class Writer,Buffer,Reader teal
+    class W green
+```
 
-    style RMQ fill:#ff9900,color:#000
-    style GW fill:#0066cc,color:#fff
-    style W fill:#009933,color:#fff
+#### 3. Evolución posible del Event Bus
+
+```mermaid
+flowchart LR
+    IEB["«interface»<br/>IEventBus<br/>PublishAsync&lt;T&gt;<br/>ReadAllAsync"]
+
+    Impl1["Fase 1<br/>InMemoryEventBus<br/>Channel&lt;T&gt;<br/>in-process"]
+    Impl2["Fase 2<br/>RedisPubSubBus<br/>Redis Pub/Sub<br/>cross-process"]
+    Impl3["Fase 3<br/>RabbitMqBus<br/>RabbitMQ / Azure SB<br/>cross-host"]
+
+    IEB -->|"implementa"| Impl1
+    IEB -->|"implementa"| Impl2
+    IEB -->|"implementa"| Impl3
+
+    classDef purple fill:#6c5ce7,stroke:#6c5ce7,color:#fff
+    classDef green fill:#00b894,stroke:#00b894,color:#fff
+    classDef blue fill:#0984e3,stroke:#0984e3,color:#fff
+    classDef orange fill:#e17055,stroke:#e17055,color:#fff
+
+    class IEB purple
+    class Impl1 green
+    class Impl2 blue
+    class Impl3 orange
 ```
 
 ---
 
-### Flujo de Creación de Orden — Reto 4
+## Flujo completo de una orden
 
 ```mermaid
 sequenceDiagram
-    actor Cliente
-    participant GW as API Gateway
-    participant OS as Order Service
-    participant INV as Inventory Service
-    participant DB as PostgreSQL
-    participant MQ as RabbitMQ
-    participant NW as Notification Worker
+    autonumber
+    actor Client as Cliente
+    participant GW  as API Gateway :5000
+    participant OS  as Order Service :5001
+    participant UC  as CreateOrderUseCase
+    participant Bus as Event Bus
+    participant W   as OrderCreatedWorker
+    participant NS  as Notification Service :5002
 
-    Cliente->>GW: POST /orders
-    GW->>GW: Autenticar JWT / Rate Limit
-    GW->>OS: POST /api/orders (forward)
+    Client->>GW: POST /api/orders { customerName }
+    GW->>OS: proxy → POST /api/orders
 
-    OS->>INV: GET /inventory/validate (sync HTTP)
-    INV-->>OS: 200 OK — stock disponible
-
-    OS->>DB: INSERT order (persist)
-    OS->>MQ: Publish event: OrderCreated
-    OS-->>GW: 201 Created
-    GW-->>Cliente: 201 Created
-
-    Note over MQ,NW: Procesamiento asíncrono
-    MQ->>NW: Deliver message: OrderCreated
-    NW->>NW: Procesar notificación
-    NW->>NW: Enviar Email / Push / SMS
-```
-
-> [!IMPORTANT]
-> La diferencia clave con el Reto 3 es que **la notificación ya no bloquea la respuesta al cliente**.
-> El Order Service publica el evento en RabbitMQ y responde inmediatamente con `201 Created`.
-> El Notification Worker procesa el evento de forma completamente independiente y asíncrona.
-
----
-
-### Diagrama de Eventos — Bus de Mensajes
-
-```mermaid
-graph LR
-    subgraph Producers["Productores de Eventos"]
-        OS[Order Service]
-        INV[Inventory Service]
+    rect rgb(30, 100, 200)
+        note over OS,Bus: Request principal — síncrono y rápido
+        OS->>UC: ExecuteAsync(request)
+        UC->>UC: Order.Create(customerName)
+        UC->>UC: repository.AddAsync(order)
+        UC->>Bus: PublishAsync(OrderCreatedEvent)
+        Bus-->>UC: Task.CompletedTask — no bloquea
+        UC-->>OS: OrderResponse
     end
 
-    subgraph RabbitMQ["RabbitMQ — Topic Exchange: ordersystem"]
-        E1{Exchange:<br/>ordersystem.events}
-        Q1[Queue:<br/>order.created]
-        Q2[Queue:<br/>order.cancelled]
-        Q3[Queue:<br/>inventory.updated]
+    OS-->>GW: 201 Created { id, status, total... }
+    GW-->>Client: 201 Created { id, status, total... }
 
-        E1 -- "routing: order.created" --> Q1
-        E1 -- "routing: order.cancelled" --> Q2
-        E1 -- "routing: inventory.updated" --> Q3
-    end
+    note over Client,GW: El cliente recibe su respuesta<br/>sin esperar el procesamiento asíncrono
 
-    subgraph Consumers["Consumidores / Workers"]
-        NW[Notification Worker<br/>order.created]
-        AW[Audit Worker<br/>order.*]
-        IW[Inventory Worker<br/>inventory.updated]
-    end
+    rect rgb(0, 180, 148)
+        note over Bus,NS: Procesamiento asíncrono — en background
+        Bus-->>W: OrderCreatedEvent
+        W->>W: LogInformation(orderId, customer, total)
 
-    OS -- "OrderCreated" --> E1
-    OS -- "OrderCancelled" --> E1
-    INV -- "InventoryUpdated" --> E1
-
-    Q1 --> NW
-    Q1 --> AW
-    Q2 --> AW
-    Q3 --> IW
-
-    style E1 fill:#ff9900,color:#000
-    style NW fill:#009933,color:#fff
-    style AW fill:#009933,color:#fff
-    style IW fill:#009933,color:#fff
-```
-
----
-
-### Infraestructura Kubernetes — Reto 4
-
-```mermaid
-graph TB
-    subgraph Ingress["Ingress Controller"]
-        ING[nginx-ingress<br/>ordersystem.local]
-    end
-
-    subgraph NS["Namespace: ordersystem"]
-        subgraph Deployments["Deployments"]
-            D_GW[API Gateway<br/>2 replicas]
-            D_OS[Order Service<br/>2 replicas]
-            D_INV[Inventory Service<br/>1 replica]
-            D_NW[Notification Worker<br/>1 replica]
-        end
-
-        subgraph Stateful["StatefulSets"]
-            SS_RMQ[RabbitMQ<br/>StatefulSet]
-            SS_PG[PostgreSQL<br/>StatefulSet]
-        end
-
-        subgraph Config["Configuración"]
-            CM[ConfigMaps]
-            SEC[Secrets<br/>DB passwords<br/>JWT keys]
-            PVC[PersistentVolumeClaims<br/>RabbitMQ data<br/>Postgres data]
+        opt Notificación externa
+            W->>NS: POST /notifications/notify
+            NS-->>W: 200 OK
         end
     end
-
-    ING --> D_GW
-    D_GW --> D_OS
-    D_GW --> D_INV
-    D_OS --> SS_PG
-    D_OS --> SS_RMQ
-    D_NW --> SS_RMQ
-    SS_RMQ --> PVC
-    SS_PG --> PVC
-    CM --> D_GW
-    CM --> D_OS
-    SEC --> D_OS
-    SEC --> SS_PG
-
-    style SS_RMQ fill:#ff9900,color:#000
-    style SS_PG fill:#336699,color:#fff
 ```
 
 ---
 
-### Comparación Reto 3 vs Reto 4
+## Contratos de eventos
 
 ```mermaid
-graph LR
-    subgraph Reto3["🔴 Reto 3 — Acoplado"]
-        R3_C([Cliente]) --> R3_API[Order API]
-        R3_API -- "HTTP sync<br/>acoplado" --> R3_N[Notifications API]
-        R3_API --- R3_MEM[(In-Memory)]
-    end
+classDiagram
+    class OrderCreatedEvent {
+        +Guid OrderId
+        +string CustomerName
+        +DateTime CreatedAt
+        +decimal Total
+        +string Currency
+    }
 
-    subgraph Reto4["🟢 Reto 4 — Distribuido"]
-        R4_C([Cliente]) --> R4_GW[API Gateway]
-        R4_GW --> R4_OS[Order Service]
-        R4_OS -- "async event" --> R4_MQ[RabbitMQ]
-        R4_MQ --> R4_W[Notification Worker]
-        R4_OS --- R4_DB[(PostgreSQL)]
-    end
+    class CreateOrderUseCase {
+        -IOrderRepository repo
+        -IEventBus eventBus
+        +ExecuteAsync(request) OrderResponse
+    }
+
+    class OrderCreatedWorker {
+        -IEventBus eventBus
+        -ILogger logger
+        +ExecuteAsync(ct)
+    }
+
+    class IEventBus {
+        <<interface>>
+        +PublishAsync(event)
+        +ReadAllAsync(ct) IAsyncEnumerable
+    }
+
+    CreateOrderUseCase ..> IEventBus : publica
+    CreateOrderUseCase ..> OrderCreatedEvent : crea
+    OrderCreatedWorker ..> IEventBus : consume
+    OrderCreatedWorker ..> OrderCreatedEvent : procesa
 ```
-
-| Aspecto | Reto 3 | Reto 4 |
-|---|---|---|
-| **Punto de entrada** | Directo al servicio | API Gateway centralizado |
-| **Comunicación** | HTTP síncrono | Eventos asíncronos (RabbitMQ) |
-| **Storage** | In-Memory (volátil) | PostgreSQL (persistente) |
-| **Notificaciones** | Acopladas al controller | Worker independiente |
-| **Escalabilidad** | Sin estado compartido | Stateless + broker desacoplado |
-| **Resiliencia** | Si notif falla → log y olvida | Si notif falla → mensaje queda en cola y se reintenta |
-| **Orquestación** | K8s básico (1 replica) | K8s con StatefulSets + PVC |
 
 ---
 
-## 3. Estructura de Carpetas — Reto 4
+## Estructura de proyectos
 
-```
-reto4/
-├── src/
-│   ├── OrderSystem.ApiGateway/         ← Nuevo: API Gateway (YARP)
-│   ├── OrderSystem.Domain/             ← Igual que reto3 (shared kernel)
-│   ├── OrderSystem.Application/        ← Evolución: agrega IMessageBus, eventos
-│   ├── OrderSystem.Infrastructure/     ← Evolución: PostgreSQL + RabbitMQ publisher
-│   ├── OrderSystem.Api/                ← Evolución: sin HttpClient a notifications
-│   ├── OrderSystem.InventoryService/   ← Nuevo: valida stock
-│   └── OrderSystem.NotificationWorker/ ← Evolución: de API a Worker Service
-├── k8s/
-│   ├── namespace.yaml
-│   ├── configmap.yaml
-│   ├── secrets.yaml                    ← Nuevo
-│   ├── deployments/
-│   │   ├── gateway.yaml
-│   │   ├── order-service.yaml
-│   │   ├── inventory-service.yaml
-│   │   └── notification-worker.yaml
-│   └── statefulsets/
-│       ├── rabbitmq.yaml               ← Nuevo
-│       └── postgresql.yaml             ← Nuevo
-├── docker-compose.yml                  ← Evolución: 5 servicios
-└── ARQUITECTURA.md                     ← Este archivo
+```mermaid
+flowchart TD
+    subgraph reto4["reto4/src/"]
+        GWProj["OrderSystem.Gateway 🆕<br/>Program.cs<br/>appsettings.json — rutas YARP"]
+        ApiProj["OrderSystem.Api<br/>Controllers/OrdersController.cs<br/>Program.cs — registra IEventBus"]
+        AppProj["OrderSystem.Application<br/>UseCases/CreateOrderUseCase.cs<br/>Events/OrderCreatedEvent.cs 🆕"]
+        DomainProj["OrderSystem.Domain<br/>Entities / ValueObjects / Enums<br/>sin cambios"]
+        InfraProj["OrderSystem.Infrastructure<br/>Repositories/InMemoryOrderRepository.cs<br/>Messaging/IEventBus.cs 🆕<br/>Messaging/InMemoryEventBus.cs 🆕"]
+        NotifProj["OrderSystem.Notifications<br/>Controllers/NotificationsController.cs<br/>Workers/OrderCreatedWorker.cs 🆕<br/>Program.cs — registra Worker"]
+    end
+
+    GWProj -->|"proxy"| ApiProj
+    GWProj -->|"proxy"| NotifProj
+    ApiProj --> AppProj
+    AppProj --> DomainProj
+    AppProj --> InfraProj
+    NotifProj --> InfraProj
+
+    classDef purple fill:#6c5ce7,stroke:#6c5ce7,color:#fff
+    classDef blue fill:#0984e3,stroke:#0984e3,color:#fff
+    classDef teal fill:#00cec9,stroke:#00cec9,color:#fff
+    classDef green fill:#00b894,stroke:#00b894,color:#fff
+    classDef gray fill:#636e72,stroke:#636e72,color:#fff
+
+    class GWProj purple
+    class ApiProj,AppProj blue
+    class InfraProj teal
+    class NotifProj green
+    class DomainProj gray
 ```
 
-> [!TIP]
-> El siguiente paso es implementar cada componente nuevo del Reto 4. El orden sugerido es:
->
-> 1. Migrar `InMemoryRepository` a **PostgreSQL** (cambio de infraestructura puro)
-> 2. Agregar **RabbitMQ** y el `EventPublisher` en el Order Service
-> 3. Convertir `OrderSystem.Notifications` en un **Worker Service** que consume eventos
-> 4. Agregar el **API Gateway** con YARP
-> 5. Crear el **Inventory Service** y conectar la validación de stock
-> 6. Actualizar los manifiestos de **Kubernetes** con los nuevos StatefulSets
+### Comparativa reto 3 vs reto 4
+
+```mermaid
+flowchart LR
+    subgraph R3["Reto 3"]
+        direction TB
+        A["Cliente conoce<br/>cada puerto"]
+        B["Controller llama<br/>HTTP síncrono"]
+        C["Cliente espera<br/>a Notifications"]
+        D["Sin Event Bus"]
+        E["Sin Worker"]
+    end
+
+    subgraph R4["Reto 4"]
+        direction TB
+        F["Cliente solo conoce<br/>el Gateway :5000"]
+        G["Use Case publica<br/>eventos asíncronos"]
+        H["Cliente recibe 201<br/>antes del procesamiento"]
+        I["Channel&lt;T&gt; Event Bus"]
+        J["BackgroundService<br/>Worker independiente"]
+    end
+
+    A -->|"resuelto"| F
+    B -->|"resuelto"| G
+    C -->|"resuelto"| H
+    D -->|"resuelto"| I
+    E -->|"resuelto"| J
+
+    classDef red fill:#d63031,stroke:#d63031,color:#fff
+    classDef green fill:#00b894,stroke:#00b894,color:#fff
+
+    class A,B,C,D,E red
+    class F,G,H,I,J green
+```
+
+---
+
+> **Nota de diseño:** El `InMemoryEventBus` con `Channel<T>` es suficiente para demostrar el patrón en desarrollo local. Pasar a RabbitMQ o Azure Service Bus en producción implica solo una nueva implementación de `IEventBus` y cambiar el registro en DI — los Use Cases y Workers no se tocan.
