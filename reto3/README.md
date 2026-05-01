@@ -11,8 +11,8 @@ Sistema de Ordenes de Compra desplegado en Docker y Kubernetes. Compuesto por do
 ```mermaid
 graph TB
     subgraph "Kubernetes - Namespace: ordersystem"
-        SVC["Service NodePort :30080\nordersystem-api-svc"]
-        SVC2["Service ClusterIP\nnotifications-api-svc"]
+        SVC["Service NodePort :30080<br/>ordersystem-api-svc"]
+        SVC2["Service ClusterIP<br/>notifications-api-svc"]
         subgraph "Deployment ordersystem-api"
             P1["Pod 1"]
             P2["Pod 2"]
@@ -21,7 +21,7 @@ graph TB
         subgraph "Deployment notifications-api"
             N1["Pod 1"]
         end
-        CM["ConfigMap\nordersystem-config"]
+        CM["ConfigMap<br/>ordersystem-config"]
     end
 
     Cliente["localhost:30080"] --> SVC
@@ -44,6 +44,7 @@ graph TB
 ## 2. Servicios
 
 ### ordersystem-api
+
 API REST para gestion de ordenes de compra. Expone los siguientes endpoints:
 
 | Metodo | Endpoint | Descripcion |
@@ -58,6 +59,7 @@ API REST para gestion de ordenes de compra. Expone los siguientes endpoints:
 Al crear una orden notifica al servicio de notificaciones via HTTP.
 
 ### notifications-api
+
 Servicio receptor de notificaciones. Expone un unico endpoint:
 
 | Metodo | Endpoint | Descripcion |
@@ -139,16 +141,20 @@ kubectl delete pod <nombre-pod> -n ordersystem
 ## 5. Evidencias
 
 ### Swagger y creacion de orden
+
 ![Swagger](evidencias/ordersystem_swagger.png)
 ![Orden creada](evidencias/ordersystem_swagger_success.png)
 
 ### Comunicacion entre servicios - Notificacion recibida
+
 ![Notificacion](evidencias/recepcion_notificacion.png)
 
 ### Escalado a 3 replicas
+
 ![Replicas](evidencias/replicas_pods.png)
 
 ### Recursos en Kubernetes
+
 ![Recursos](evidencias/recursos_aks.png)
 
 ---

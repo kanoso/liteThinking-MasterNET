@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude auth status:*)",
+      "Bash(claude:*)",
+      "Bash(cd:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)"
+    ]
+  }
+}
