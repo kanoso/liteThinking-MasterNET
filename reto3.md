@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 ## Reto 3. Contenerizacion y Orquestacion con Kubernetes
 
 ### Descripcion del reto
@@ -126,3 +132,15 @@ reto3/
 - [x] Archivos YAML en carpeta `k8s/`
 - [x] Evidencias de escalado y self-healing (capturas o logs)
 - [x] README con decisiones arquitectonicas y trade-offs
+
+---
+
+## Ver también
+
+- [[reto2]]
+- [[reto2-implementacion]]
+- [[reto4]]
+- [[arquitectura-vs-patrones]]
+- [[microservices]]
+- [[docker-guia]]
+- [[aks]]

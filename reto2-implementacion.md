@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 # Reto 2 - Guia de Implementacion
 
 ## Dominio Elegido: Sistema de Ordenes de Compra
@@ -922,3 +928,12 @@ sequenceDiagram
   - Menor complejidad y curva de aprendizaje.
   - Menos paquetes externos.
   - Si el proyecto creciera, se podria evaluar su adopcion en el futuro.
+
+---
+
+## Ver también
+
+- [[reto2]]
+- [[reto3]]
+- [[arquitectura-vs-patrones]]
+- [[microservices]]

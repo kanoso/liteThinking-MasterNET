@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 # Reto 2 - Guia de Implementacion
 
 ## Dominio Elegido: Sistema de Ordenes de Compra

@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 # Reto 3 - Sistema de Ordenes Contenerizado
 
 ## Descripcion

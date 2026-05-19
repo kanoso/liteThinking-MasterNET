@@ -344,14 +344,14 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    M1["M1<br/>Monolito Modular<br/>3 ing · 50 ord/min<br/>99.0%"]
-    M2["M2<br/>N-Tier + Workers<br/>7 ing · 1k ord/min<br/>99.5%"]
-    M3["M3<br/>Microservicios<br/>15 ing · 10k ord/min<br/>99.9%"]
-    M4["M4<br/>Cell-Based<br/>30+ ing · 50k ord/min<br/>99.95%"]
+    M1["M1\nMonolito Modular\n3 ing · 50 ord/min\n99.0%"]
+    M2["M2\nN-Tier + Workers\n7 ing · 1k ord/min\n99.5%"]
+    M3["M3\nMicroservicios\n15 ing · 10k ord/min\n99.9%"]
+    M4["M4\nCell-Based\n30+ ing · 50k ord/min\n99.95%"]
 
-    M1 -->|"DB saturada<br/>en primer pico"| M2
-    M2 -->|"Equipos pisándose<br/>flash sales 100×"| M3
-    M3 -->|"SLA globales<br/>blast radius"| M4
+    M1 -->|"DB saturada\nen primer pico"| M2
+    M2 -->|"Equipos pisándose\nflash sales 100×"| M3
+    M3 -->|"SLA globales\nblast radius"| M4
 ```
 
 | | M1 | M2 | M3 | M4 |
@@ -383,7 +383,8 @@ flowchart LR
 
 ## Ver también
 
+- [[reto1-simplificado]]
 - [[reto1]]
-- [[reto2]]
+- [[ARQUITECTURA]]
 - [[arquitectura-vs-patrones]]
 - [[microservices]]

@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 # Arquitectura de Software vs Patrones de Diseno
 
 ## Vision General
@@ -320,3 +326,15 @@ flowchart TD
 > **Patrones de Diseno** = tacticas reutilizables para resolver problemas de implementacion (faciles de aplicar y cambiar).
 >
 > Ambos son complementarios: una buena arquitectura necesita buenos patrones, y los mejores patrones sin arquitectura llevan al caos.
+
+---
+
+## Ver también
+
+- [[microservices]]
+- [[docker-guia]]
+- [[aks]]
+- [[reto1]]
+- [[reto2]]
+- [[reto3]]
+- [[reto1-simplificado]]

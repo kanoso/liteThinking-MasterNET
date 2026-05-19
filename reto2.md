@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 ## Reto 2. Arquitectura, Calidad de Código y Diseño en Capas
 
 ### Descripción del reto
@@ -125,3 +131,14 @@ Intentos: Ilimitados
 Límite Marzo 22, 2026 23:59 h
 
 Calificación: 0/100Reto
+
+---
+
+## Ver también
+
+- [[reto1]]
+- [[reto2-implementacion]]
+- [[reto3]]
+- [[arquitectura-vs-patrones]]
+- [[microservices]]
+- [[docker-guia]]

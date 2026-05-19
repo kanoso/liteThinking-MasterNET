@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 # Reto 4 — Arquitectura Distribuida de Microservicios
 
 Sistema de órdenes evolucionado hacia una arquitectura distribuida con API Gateway, comunicación

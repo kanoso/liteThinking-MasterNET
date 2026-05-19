@@ -1,3 +1,9 @@
+---
+tags:
+  - area/lite
+  - tipo/nota
+---
+
 # Reto 4 — Evolución hacia Arquitectura Distribuida
 
 ## Índice
@@ -416,3 +422,14 @@ flowchart LR
 ---
 
 > **Nota de diseño:** El `InMemoryEventBus` con `Channel<T>` es suficiente para demostrar el patrón en desarrollo local. Pasar a RabbitMQ o Azure Service Bus en producción implica solo una nueva implementación de `IEventBus` y cambiar el registro en DI — los Use Cases y Workers no se tocan.
+
+---
+
+## Ver también
+
+- [[reto3]]
+- [[reto2]]
+- [[arquitectura-vs-patrones]]
+- [[microservices]]
+- [[docker-guia]]
+- [[aks]]
